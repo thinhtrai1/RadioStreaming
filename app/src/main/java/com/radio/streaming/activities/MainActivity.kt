@@ -10,12 +10,10 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.databinding.DataBindingUtil
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.SimpleExoPlayer
 import com.google.android.things.pio.Gpio
 import com.google.android.things.pio.PeripheralManager
-import com.radio.streaming.R
 import com.radio.streaming.databinding.ActivityMainBinding
 import com.radio.streaming.services.BootCompleteReceiver
 import java.util.*
@@ -31,13 +29,13 @@ class MainActivity : AppCompatActivity() {
         override fun run() {
             ledState = !ledState
             ledGpio!!.value = ledState
-            handler.postDelayed(this, 1000L)
+            handler.postDelayed(this, 500L)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        mBinding = DataBindingUtil.setContentView(this, R.layout.activity_main)
+        mBinding = ActivityMainBinding.inflate(layoutInflater)
         mPlayer = SimpleExoPlayer.Builder(this).build()
 
         mBinding.playerView.player = mPlayer
@@ -47,7 +45,7 @@ class MainActivity : AppCompatActivity() {
             mPlayer.seekToDefaultPosition()
         }
 
-        val sharedPref = getSharedPref()
+        val sharedPref = getSharedPreferences("RadioStreaming2021", MODE_PRIVATE)
         if (sharedPref.getLong(PREF_INSTALL_APP_TIME, 0L) == 0L) {
             sharedPref.edit().putLong(PREF_INSTALL_APP_TIME, Calendar.getInstance().timeInMillis).apply()
             createRebootAlarm(this)
@@ -55,15 +53,26 @@ class MainActivity : AppCompatActivity() {
 
         val gpioForLED = when (Build.DEVICE) {
             "rpi3", "rpi3bp" -> "BCM6"
-            "imx7d_pico" -> "GPIO2_IO02"
-            else -> {
-                showToast("Unknown Build.DEVICE ${Build.DEVICE}")
-                return
-            }
+            else -> "GPIO2_IO02"
+//            else -> {
+//                showToast("Unknown Build.DEVICE ${Build.DEVICE}")
+//                return
+//            }
         }
-        ledGpio = PeripheralManager.getInstance().openGpio(gpioForLED)
+        ledGpio = try {
+            PeripheralManager.getInstance().openGpio(gpioForLED)
+        } catch (e: NoClassDefFoundError) {
+            showToast("Unknown Build.DEVICE ${Build.DEVICE}")
+            return
+        }
         ledGpio!!.setDirection(Gpio.DIRECTION_OUT_INITIALLY_LOW)
         handler.post(blinkRunnable)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        handler.removeCallbacks(blinkRunnable)
+        ledGpio?.close()
     }
 
     private fun showToast(message: String) {
@@ -73,8 +82,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val PREF_INSTALL_APP_TIME = "INSTALL_APP_TIME"
 
-        fun getSharedPref() = StreamingApplication.instance.getSharedPreferences("RadioStreaming2021", MODE_PRIVATE)!!
-
         fun createRebootAlarm(context: Context) {
             val calendar = Calendar.getInstance().apply {
                 set(Calendar.HOUR_OF_DAY, 0)
@@ -82,11 +89,10 @@ class MainActivity : AppCompatActivity() {
                 set(Calendar.SECOND, 0)
                 add(Calendar.DATE, 1)
             }
-            val alarmIntent = Intent(context, BootCompleteReceiver::class.java).setAction("REBOOT")
             val pendingIntent = PendingIntent.getBroadcast(
                 context,
                 0,
-                alarmIntent,
+                Intent(context, BootCompleteReceiver::class.java).setAction("REBOOT"),
                 PendingIntent.FLAG_UPDATE_CURRENT
             )
             (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).set(
